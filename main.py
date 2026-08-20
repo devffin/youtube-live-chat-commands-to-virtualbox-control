@@ -2,9 +2,9 @@ import json
 import os
 import virtualbox
 import pytchat
-from supplies.BadKeyboards import BadKeyboards
-from supplies.BadMouses import BadMouses
-from supplies.ForegroundStub import ForegroundStub
+from supplies.BadKeyboards.BadKeyboards import BadKeyboards
+from supplies.BadMouses.BadMouses import BadMouses
+from supplies.ForegroundStub.ForegroundStub import ForegroundStub
 
 class Youtube2Box:
     def __init__(self):
@@ -12,7 +12,7 @@ class Youtube2Box:
         with open(config_path, "r") as f:
             self.config = json.load(f)
             
-                self.vbox = virtualbox.VirtualBox()
+            self.vbox = virtualbox.VirtualBox()
         self.vm = self.vbox.find_machine(self.config["vm_name"])
         self.session = self.vm.create_session()
         
@@ -20,8 +20,8 @@ class Youtube2Box:
         kb = self.session.console.keyboard
         mouse = self.session.console.mouse
         self.modules = {
-            "BadKeyboards": BadKeyboards(kb),
-            "BadMouses": BadMouses(mouse),
+            "BadKeyboards": BadKeyboards(kb, mouse),
+            "BadMouses": BadMouses(kb, mouse),
             "ForegroundStub": ForegroundStub(kb, mouse)
         }
         self.cmd_map = self.config["Cust_plgs"]
