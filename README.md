@@ -12,6 +12,8 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
 - Parse chat messages for predefined commands
 - Map chat commands to VirtualBox actions (start, stop, pause, snapshot, send keyboard/mouse events)
 - Basic access control via allowed user list or command tokens
+- Desktop UI showing VM state, action buttons, snapshots, and an event log
+- Built-in chat commands: `!start`, `!stop`, `!pause`, `!resume`, `!reset`, and `!snapshot <name>`
 
 > The exact supported commands and configuration depend on the implementation files in the repo. The README below gives a generic setup and usage guide you can adapt.
 
@@ -45,10 +47,30 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
    - Save `client_secrets.json` to the project directory (or follow the repo-specific config)
 4. Configure the controller:
    - Create a config file (example below) or set environment variables
-5. Run the controller:
-   python main.py --config config.yaml
+5. Run the controller (the desktop UI is enabled by default):
+  python main.py --config config.json
+
+  To run the chat listener without the desktop UI:
+  python main.py --config config.json --no-ui
 
 Adjust commands and script name to match the repository implementation.
+
+## Desktop UI and VM commands
+
+The UI connects to the configured VM and provides start, stop, pause, resume,
+reset, and snapshot actions. The chat listener runs in a background thread so
+the status display and event log remain responsive.
+
+The same VM actions can be sent from YouTube Live Chat:
+
+| Command | Action |
+| --- | --- |
+| `!start` | Start the VM |
+| `!stop` | Power down the VM |
+| `!pause` | Pause the VM |
+| `!resume` | Resume the VM |
+| `!reset` | Reset the VM |
+| `!snapshot <name>` | Create a snapshot |
 
 ## Example configuration (yaml)
 
