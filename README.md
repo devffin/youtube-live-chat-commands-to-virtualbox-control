@@ -36,11 +36,11 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
 ## Quick start (Python example)
 
 1. Clone the repo:
-   git clone https://github.com/devffin/youtube-live-chat-commands-to-virtualbox-control.git
+   ```git clone https://github.com/devffin/youtube-live-chat-commands-to-virtualbox-control.git```
 2. Create a virtual environment and install dependencies:
-   python -m venv .venv
+   ```python -m venv .venv
    source .venv/bin/activate
-   pip install -r requirements.txt
+   pip install -r requirements.txt```
 3. Obtain Google API credentials:
    - Create OAuth 2.0 client credentials in Google Cloud Console
    - Enable the YouTube Data API for your project
