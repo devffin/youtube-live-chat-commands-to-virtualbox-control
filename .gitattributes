@@ -1,2 +1,3 @@
 *.json linguist-detectable=true
 *.json linguist-documentation=false
+*.py whitespace=cr-at-eol

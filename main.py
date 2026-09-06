@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -9,6 +10,8 @@ import virtualbox
 from supplies.BadKeyboards.BadKeyboards import BadKeyboards
 from supplies.BadMouses.BadMouses import BadMouses
 from supplies.ForegroundStub.ForegroundStub import ForegroundStub
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Youtube2Box:
@@ -21,6 +24,7 @@ class Youtube2Box:
         self.session = None
         self.modules = {}
         self.cmd_map = self.config.get("Cust_plgs", {})
+        self.allowed_users = {str(user).lower() for user in self.config.get("allowed_users", [])}
         self.chat_thread = None
         self.stop_event = threading.Event()
 
@@ -28,20 +32,25 @@ class Youtube2Box:
         self.on_event(message)
 
     def state(self):
-        return str(self.vm.state).split(".")[-1].lower()
+        return str(self.vm.state).rsplit(".", 1)[-1].lower()
 
     def start(self):
         if self.state() in ("running", "paused"):
             return "VM deja demarree"
         launch_session = virtualbox.Session()
-        progress = self.vm.launch_vm_process(launch_session, "gui", "")
-        progress.wait_for_completion()
+        try:
+            progress = self.vm.launch_vm_process(launch_session, "gui", "")
+            progress.wait_for_completion()
+        finally:
+            launch_session.unlock_machine()
         self.connect_session()
         return "VM demarree"
 
     def connect_session(self):
         if self.session:
             return
+        if self.state() not in ("running", "paused", "stuck"):
+            raise RuntimeError("La VM doit etre demarree pour acceder a la console")
         self.session = self.vm.create_session()
         keyboard = self.session.console.keyboard
         mouse = self.session.console.mouse
@@ -52,21 +61,33 @@ class Youtube2Box:
         }
 
     def stop(self):
+        if self.state() not in ("running", "paused", "stuck"):
+            return "VM deja arretee"
         self.connect_session()
-        self.session.console.power_down()
+        progress = self.session.console.power_down()
+        progress.wait_for_completion()
+        self.session.unlock_machine()
+        self.session = None
+        self.modules = {}
         return "VM arretee"
 
     def pause(self):
+        if self.state() != "running":
+            raise RuntimeError("La VM doit etre en execution pour etre mise en pause")
         self.connect_session()
         self.session.console.pause()
         return "VM mise en pause"
 
     def resume(self):
+        if self.state() != "paused":
+            raise RuntimeError("La VM doit etre en pause pour reprendre")
         self.connect_session()
         self.session.console.resume()
         return "VM reprise"
 
     def reset(self):
+        if self.state() != "running":
+            raise RuntimeError("La VM doit etre en execution pour redemarrer")
         self.connect_session()
         self.session.console.reset()
         return "VM redemarree"
@@ -115,12 +136,29 @@ class Youtube2Box:
             self.emit(f"Erreur commande {command}: {error}")
         return command
 
+    def is_allowed(self, item):
+        if not self.allowed_users:
+            return True
+        author = getattr(item, "author", None)
+        values = {
+            str(getattr(author, "name", "")).lower(),
+            str(getattr(author, "channelId", "")).lower(),
+        }
+        return bool(values & self.allowed_users)
+
     def run_chat(self):
-        chat = pytchat.create(video_id=self.config["video_id"])
-        self.emit(f"Chat actif pour {self.config['vm_name']}")
-        while chat.is_alive() and not self.stop_event.is_set():
-            for item in chat.get().sync_items():
-                self.dispatch_chat_command(item.message)
+        try:
+            chat = pytchat.create(video_id=self.config["video_id"])
+            self.emit(f"Chat actif pour {self.config['vm_name']}")
+            while chat.is_alive() and not self.stop_event.is_set():
+                for item in chat.get().sync_items():
+                    if self.is_allowed(item):
+                        self.dispatch_chat_command(item.message)
+                    else:
+                        LOGGER.warning("Commande ignoree: utilisateur non autorise")
+        except Exception as error:
+            LOGGER.exception("Erreur de l'ecoute YouTube")
+            self.emit(f"Erreur chat: {error}")
 
     def start_chat(self):
         if self.chat_thread and self.chat_thread.is_alive():
@@ -200,6 +238,7 @@ class ControlWindow:
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Controle VirtualBox via YouTube Live Chat")
     parser.add_argument("--config", default="config.json")
     parser.add_argument("--no-ui", action="store_true", help="Lancer uniquement l'ecoute du chat")

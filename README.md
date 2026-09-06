@@ -21,7 +21,6 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
 
 - VirtualBox installed and `VBoxManage` available on PATH
 - Python 3.8+ (or the language/runtime used by the project)
-- Google API credentials (OAuth 2.0 client or API key with YouTube Data API / YouTube Live Streaming access)
 - Network access to YouTube live chat
 - (Optional) A dedicated low-privilege account to run the controller
 
@@ -45,8 +44,10 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
    - Create OAuth 2.0 client credentials in Google Cloud Console
    - Enable the YouTube Data API for your project
    - Save `client_secrets.json` to the project directory (or follow the repo-specific config)
-4. Configure the controller:
-   - Create a config file (example below) or set environment variables
+4. Configure the controller in `config.json`:
+  - Set `vm_name` to the registered VirtualBox VM name
+  - Set `video_id` to the live stream ID
+  - Optionally set `allowed_users` to a list of YouTube usernames or channel IDs
 5. Run the controller (the desktop UI is enabled by default):
   python main.py --config config.json
 
@@ -72,27 +73,24 @@ The same VM actions can be sent from YouTube Live Chat:
 | `!reset` | Reset the VM |
 | `!snapshot <name>` | Create a snapshot |
 
-## Example configuration (yaml)
+## Configuration example (JSON)
 
-```yaml
-youtube:
-  live_chat_id: YOUR_LIVE_CHAT_ID_OR_STREAM_ID
-  credentials_file: client_secrets.json
-  allowed_users:
-    - your_channel_name
-    - trusted_moderator
-
-virtualbox:
-  vm_name: "Test VM"
-  vboxmanage_path: "VBoxManage" # optional if on PATH
-
-commands:
-  start: "startvm"
-  stop: "controlvm acpipowerbutton"
-  pause: "controlvm pause"
-  resume: "controlvm resume"
-  snapshot: "snapshot take {name}"
+```json
+{
+  "vm_name": "Test VM",
+  "video_id": "YOUR_LIVE_STREAM_ID",
+  "allowed_users": ["your_channel_name", "trusted_channel_id"],
+  "Cust_plgs": {
+    "!key": ["BadKeyboards", "press"],
+    "!type": ["BadKeyboards", "type"],
+    "!move": ["BadMouses", "move_rel"],
+    "!focus": ["ForegroundStub", "focus"]
+  }
+}
 ```
+
+If `allowed_users` is empty or absent, commands are accepted from every chat
+user. Use a whitelist for any VM exposed to a public stream.
 
 ## Typical command flow
 

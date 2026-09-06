@@ -1,5 +1,3 @@
-import time
-
 class ForegroundStub:
     def __init__(self, kb, mouse):
         self.kb = kb
@@ -16,12 +14,12 @@ class ForegroundStub:
     def refresh(self, args=None):
         print("Refreshing session lock")
         self.focus()
-        
+
     def fullscreen(self, args=None):
         print("Toggling Fullscreen Mode")
-        self.kb.put_keys("{rctrl}f")
+        self.kb.put_keys(["RCTRL", "F"])
 
     def keep_alive(self, args=None):
         print("Anti-sleep trapped")
-        self.kb.put_keys("{shift}")
+        self.kb.put_keys(["SHIFT"])
 
