@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+from pathlib import Path
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -16,17 +17,34 @@ LOGGER = logging.getLogger(__name__)
 
 class Youtube2Box:
     def __init__(self, config_path="config.json", on_event=None):
-        with open(config_path, "r", encoding="utf-8") as config_file:
+        self.config_path = Path(config_path).expanduser()
+        if not self.config_path.is_absolute():
+            self.config_path = Path(__file__).resolve().parent / self.config_path
+        with self.config_path.open("r", encoding="utf-8") as config_file:
             self.config = json.load(config_file)
+        self._validate_config()
         self.on_event = on_event or (lambda message: print(message))
         self.vbox = virtualbox.VirtualBox()
         self.vm = self.vbox.find_machine(self.config["vm_name"])
         self.session = None
         self.modules = {}
         self.cmd_map = self.config.get("Cust_plgs", {})
-        self.allowed_users = {str(user).lower() for user in self.config.get("allowed_users", [])}
+        allowed_users = self.config.get("allowed_users", [])
+        if not isinstance(allowed_users, list):
+            raise ValueError("Configuration field 'allowed_users' must be an array")
+        self.allowed_users = {str(user).strip().lower() for user in allowed_users if str(user).strip()}
         self.chat_thread = None
         self.stop_event = threading.Event()
+        self.action_lock = threading.RLock()
+        if self.state() in ("running", "paused", "stuck"):
+            self.connect_session()
+
+    def _validate_config(self):
+        for key in ("vm_name", "video_id"):
+            if not isinstance(self.config.get(key), str) or not self.config[key].strip():
+                raise ValueError(f"Configuration field '{key}' is required")
+        if not isinstance(self.config.get("Cust_plgs", {}), dict):
+            raise ValueError("Configuration field 'Cust_plgs' must be an object")
 
     def emit(self, message):
         self.on_event(message)
@@ -35,16 +53,17 @@ class Youtube2Box:
         return str(self.vm.state).rsplit(".", 1)[-1].lower()
 
     def start(self):
-        if self.state() in ("running", "paused"):
-            return "VM deja demarree"
-        launch_session = virtualbox.Session()
-        try:
-            progress = self.vm.launch_vm_process(launch_session, "gui", "")
-            progress.wait_for_completion()
-        finally:
-            launch_session.unlock_machine()
-        self.connect_session()
-        return "VM demarree"
+        with self.action_lock:
+            if self.state() in ("running", "paused"):
+                return "VM deja demarree"
+            launch_session = virtualbox.Session()
+            try:
+                progress = self.vm.launch_vm_process(launch_session, "gui", "")
+                progress.wait_for_completion()
+            finally:
+                launch_session.unlock_machine()
+            self.connect_session()
+            return "VM demarree"
 
     def connect_session(self):
         if self.session:
@@ -61,41 +80,47 @@ class Youtube2Box:
         }
 
     def stop(self):
-        if self.state() not in ("running", "paused", "stuck"):
-            return "VM deja arretee"
-        self.connect_session()
-        progress = self.session.console.power_down()
-        progress.wait_for_completion()
-        self.session.unlock_machine()
-        self.session = None
-        self.modules = {}
-        return "VM arretee"
+        with self.action_lock:
+            if self.state() not in ("running", "paused", "stuck"):
+                return "VM deja arretee"
+            self.connect_session()
+            progress = self.session.console.power_down()
+            progress.wait_for_completion()
+            self.session.unlock_machine()
+            self.session = None
+            self.modules = {}
+            return "VM arretee"
 
     def pause(self):
-        if self.state() != "running":
-            raise RuntimeError("La VM doit etre en execution pour etre mise en pause")
-        self.connect_session()
-        self.session.console.pause()
-        return "VM mise en pause"
+        with self.action_lock:
+            if self.state() != "running":
+                raise RuntimeError("La VM doit etre en execution pour etre mise en pause")
+            self.connect_session()
+            self.session.console.pause()
+            return "VM mise en pause"
 
     def resume(self):
-        if self.state() != "paused":
-            raise RuntimeError("La VM doit etre en pause pour reprendre")
-        self.connect_session()
-        self.session.console.resume()
-        return "VM reprise"
+        with self.action_lock:
+            if self.state() != "paused":
+                raise RuntimeError("La VM doit etre en pause pour reprendre")
+            self.connect_session()
+            self.session.console.resume()
+            return "VM reprise"
 
     def reset(self):
-        if self.state() != "running":
-            raise RuntimeError("La VM doit etre en execution pour redemarrer")
-        self.connect_session()
-        self.session.console.reset()
-        return "VM redemarree"
+        with self.action_lock:
+            if self.state() != "running":
+                raise RuntimeError("La VM doit etre en execution pour redemarrer")
+            self.connect_session()
+            self.session.console.reset()
+            return "VM redemarree"
 
     def save_snapshot(self, name):
-        snapshot_name = name.strip() or "youtube2box"
-        self.vm.take_snapshot(snapshot_name, "Snapshot cree depuis Youtube2Box", False)
-        return f"Snapshot cree: {snapshot_name}"
+        with self.action_lock:
+            snapshot_name = name.strip() or "youtube2box"
+            progress = self.vm.take_snapshot(snapshot_name, "Snapshot cree depuis Youtube2Box", False)
+            progress.wait_for_completion()
+            return f"Snapshot cree: {snapshot_name}"
 
     def run_action(self, action, argument=""):
         actions = {
@@ -106,6 +131,10 @@ class Youtube2Box:
             "reset": self.reset,
             "snapshot": lambda: self.save_snapshot(argument),
         }
+        if action not in actions:
+            message = f"Action inconnue: {action}"
+            self.emit(message)
+            return message
         try:
             result = actions[action]()
             self.emit(result)
@@ -116,7 +145,9 @@ class Youtube2Box:
             return message
 
     def dispatch_chat_command(self, message):
-        parts = message.strip().split(" ", 1)
+        parts = message.strip().split(maxsplit=1)
+        if not parts:
+            return None
         command = parts[0].lower()
         argument = parts[1] if len(parts) > 1 else ""
         builtins = {f"!{name}": name for name in ("start", "stop", "pause", "resume", "reset", "snapshot")}
@@ -124,13 +155,19 @@ class Youtube2Box:
             return self.run_action(builtins[command], argument)
         if command not in self.cmd_map:
             return None
-        module_name, method_name = self.cmd_map[command]
+        mapping = self.cmd_map[command]
+        if not isinstance(mapping, (list, tuple)) or len(mapping) != 2:
+            self.emit(f"Configuration invalide pour: {command}")
+            return None
+        module_name, method_name = mapping
         module = self.modules.get(module_name)
         function = getattr(module, method_name, None) if module else None
         if not function:
+            self.emit(f"Console VM indisponible pour: {command}")
             return None
         try:
-            function(argument)
+            with self.action_lock:
+                function(argument)
             self.emit(f"Commande executee: {command}")
         except Exception as error:
             self.emit(f"Erreur commande {command}: {error}")
@@ -170,11 +207,17 @@ class Youtube2Box:
 
     def close(self):
         self.stop_event.set()
-        if self.session:
-            try:
-                self.session.unlock_machine()
-            except Exception:
-                pass
+        if self.chat_thread and self.chat_thread.is_alive():
+            self.chat_thread.join(timeout=2)
+        with self.action_lock:
+            if self.session:
+                try:
+                    self.session.unlock_machine()
+                except Exception:
+                    LOGGER.exception("Erreur lors de la fermeture de la session VM")
+                finally:
+                    self.session = None
+                    self.modules = {}
 
 
 class ControlWindow:

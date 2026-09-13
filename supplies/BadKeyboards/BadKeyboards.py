@@ -8,11 +8,12 @@ class BadKeyboards:
             return
         try:
             self.kb.put_keys(keys)
-        except Exception as e:
-            print(f"BadKeyboards Error: {e}")
+        except Exception as error:
+            print(f"BadKeyboards error: {error}")
 
     def type(self, args):
-        if not args: return
+        if not args:
+            return
         self.kb.put_keys([self._parse_char(char) for char in args])
 
     def combo(self, args):
