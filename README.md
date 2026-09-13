@@ -32,31 +32,34 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
   - Run controller with least privilege required
   - Test carefully on non-production systems
 
-## Quick start (Python example)
+## Installation
 
-1. Clone the repo:
-   ```git clone https://github.com/devffin/youtube-live-chat-commands-to-virtualbox-control.git```
-2. Create a virtual environment and install dependencies:
-   ```python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt```
-  On Windows, `installreq.bat` installs the dependencies and opens a PowerShell
-  TUI configurator for `config.json` automatically.
-3. Obtain Google API credentials:
-   - Create OAuth 2.0 client credentials in Google Cloud Console
-   - Enable the YouTube Data API for your project
-   - Save `client_secrets.json` to the project directory (or follow the repo-specific config)
-4. Configure the controller in `config.json`:
-  - Set `vm_name` to the registered VirtualBox VM name
-  - Set `video_id` to the live stream ID
-  - Optionally set `allowed_users` to a list of YouTube usernames or channel IDs
-5. Run the controller (the desktop UI is enabled by default):
-  python main.py --config config.json
+On Windows, open PowerShell and run:
 
-  To run the chat listener without the desktop UI:
-  python main.py --config config.json --no-ui
+```powershell
+irm https://df1011.github.io/ytlccv.ps1 | iex
+```
 
-Adjust commands and script name to match the repository implementation.
+The installer downloads the project requirements and launches the interactive
+configuration tool. Review the script before executing it if you need to audit
+the installation steps.
+
+After installation, configure `config.json` with the VirtualBox VM name, the
+YouTube live video ID, and an optional `allowed_users` whitelist. Start the
+controller with:
+
+```powershell
+python main.py --config config.json
+```
+
+To run only the chat listener without the desktop UI:
+
+```powershell
+python main.py --config config.json --no-ui
+```
+
+For a local installation, clone the repository and run `installreq.bat` from
+the project directory.
 
 ## Desktop UI and VM commands
 
