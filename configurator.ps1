@@ -1,0 +1,113 @@
+$ErrorActionPreference = 'Stop'
+$configPath = Join-Path $PSScriptRoot 'config.json'
+
+function Read-Config {
+    if (Test-Path $configPath) {
+        return (Get-Content -Raw -Path $configPath | ConvertFrom-Json)
+    }
+
+    return [pscustomobject]@{
+        vm_name = 'Windows10'
+        video_id = 'LIVE_ID'
+        allowed_users = @()
+        Cust_plgs = [pscustomobject]@{}
+    }
+}
+
+function Read-Value {
+    param([string]$Label, [string]$Current)
+    $value = Read-Host "$Label [$Current]"
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Current
+    }
+    return $value.Trim()
+}
+
+function Read-Multiline {
+    param([string]$Label, [string[]]$Current)
+    Write-Host "`n$Label"
+    Write-Host '(Une ligne par valeur, ligne vide pour terminer.)'
+    if ($Current.Count -gt 0) {
+        Write-Host "Valeurs actuelles: $($Current -join ', ')"
+    }
+    $values = @()
+    while ($true) {
+        $line = Read-Host '>'
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            break
+        }
+        $values += $line.Trim()
+    }
+    return $values
+}
+
+function Save-Config {
+    param($Config)
+    $json = $Config | ConvertTo-Json -Depth 10
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($configPath, $json, $utf8NoBom)
+}
+
+try {
+    $config = Read-Config
+    $vmName = [string]$config.vm_name
+    $videoId = [string]$config.video_id
+    $allowedUsers = @($config.allowed_users | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $pluginsJson = if ($config.Cust_plgs) { $config.Cust_plgs | ConvertTo-Json -Depth 5 } else { '{}' }
+
+    while ($true) {
+        Clear-Host
+        Write-Host '========================================' -ForegroundColor Cyan
+        Write-Host ' Youtube2Box - Configuration JSON (TUI)' -ForegroundColor Cyan
+        Write-Host '========================================' -ForegroundColor Cyan
+        Write-Host "`nFichier: $configPath"
+        Write-Host "`n[1] Nom de VM       : $vmName"
+        Write-Host "[2] ID du live      : $videoId"
+        Write-Host "[3] Utilisateurs    : $(if ($allowedUsers.Count) { $allowedUsers -join ', ' } else { '(tous)' })"
+        Write-Host "[4] Plugins JSON    : $($pluginsJson -replace '\s+', ' ' | Select-Object -First 1)"
+        Write-Host "`n[S] Sauvegarder    [Q] Quitter sans sauvegarder"
+
+        $choice = (Read-Host '`nChoix').Trim().ToUpperInvariant()
+        switch ($choice) {
+            '1' { $vmName = Read-Value 'Nom de la VM' $vmName }
+            '2' { $videoId = Read-Value 'ID du live YouTube' $videoId }
+            '3' { $allowedUsers = @(Read-Multiline 'Utilisateurs autorises' $allowedUsers) }
+            '4' {
+                Write-Host "`nCollez le JSON des plugins sur une seule ligne."
+                Write-Host 'Exemple: {"!key":["BadKeyboards","press"]}'
+                $candidate = Read-Host 'JSON'
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                    try {
+                        $null = $candidate | ConvertFrom-Json
+                        $pluginsJson = $candidate
+                    } catch {
+                        Write-Host "JSON invalide: $($_.Exception.Message)" -ForegroundColor Red
+                        Read-Host 'Appuyez sur Entree pour continuer'
+                    }
+                }
+            }
+            'S' {
+                if ([string]::IsNullOrWhiteSpace($vmName) -or [string]::IsNullOrWhiteSpace($videoId)) {
+                    Write-Host 'Le nom de VM et l ID du live sont obligatoires.' -ForegroundColor Red
+                    Read-Host 'Appuyez sur Entree pour continuer'
+                    continue
+                }
+                $configToSave = [ordered]@{
+                    vm_name = $vmName
+                    video_id = $videoId
+                    allowed_users = $allowedUsers
+                    Cust_plgs = ($pluginsJson | ConvertFrom-Json)
+                }
+                Save-Config $configToSave
+                Write-Host "Configuration enregistree dans $configPath" -ForegroundColor Green
+                Read-Host 'Appuyez sur Entree pour quitter'
+                exit 0
+            }
+            'Q' { exit 0 }
+            default { Write-Host 'Choix invalide.' -ForegroundColor Yellow; Start-Sleep -Seconds 1 }
+        }
+    }
+} catch {
+    Write-Host "Erreur configurateur: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}

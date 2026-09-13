@@ -40,6 +40,11 @@ if defined PYCMD (
   )
   echo.
   echo Requirements have been installed successfully!
+  echo Opening the JSON TUI configurator...
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%configurator.ps1"
+  if errorlevel 1 (
+    echo WARNING: JSON configurator could not be started.
+  )
   pause
   exit /b 0
 )

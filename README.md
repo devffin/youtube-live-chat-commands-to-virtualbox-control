@@ -40,6 +40,8 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
    ```python -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt```
+  On Windows, `installreq.bat` installs the dependencies and opens a PowerShell
+  TUI configurator for `config.json` automatically.
 3. Obtain Google API credentials:
    - Create OAuth 2.0 client credentials in Google Cloud Console
    - Enable the YouTube Data API for your project
