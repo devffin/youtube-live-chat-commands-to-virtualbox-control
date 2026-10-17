@@ -6,10 +6,7 @@ class BadKeyboards:
         keys = self._parse_keys(args)
         if not keys:
             return
-        try:
-            self.kb.put_keys(keys)
-        except Exception as error:
-            print(f"BadKeyboards error: {error}")
+        self.kb.put_keys(keys)
 
     def type(self, args):
         if not args:

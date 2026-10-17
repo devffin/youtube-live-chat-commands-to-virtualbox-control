@@ -12,27 +12,29 @@ if not exist "%REQ_FILE%" (
   exit /b 1
 )
 
-rem --- Ensure elevated privileges if installing system-wide Python ---
-net session >nul 2>&1
-if errorlevel 1 (
-  echo Administrative privileges are required for a system Python install.
-  echo Requesting elevation...
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-  exit /b
-)
-
 rem --- Determine which python launcher to use (prefer py then python) ---
 set "PYCMD="
-where py >nul 2>&1 && set "PYCMD=py" || (
-  where python >nul 2>&1 && set "PYCMD=python"
+set "PIP_SCOPE=--user"
+if defined VIRTUAL_ENV (
+  set "PYCMD=python"
+  set "PIP_SCOPE="
+) else (
+  where py >nul 2>&1 && set "PYCMD=py" || (
+    where python >nul 2>&1 && set "PYCMD=python"
+  )
 )
 
 if defined PYCMD (
   echo Using %PYCMD% to install requirements from "%REQ_FILE%".
   echo Upgrading pip...
-  %PYCMD% -m pip install --upgrade pip
+  %PYCMD% -m pip install --upgrade %PIP_SCOPE% pip
+  if errorlevel 1 (
+    echo ERROR: pip upgrade failed.
+    pause
+    exit /b 1
+  )
   echo Installing requirements...
-  %PYCMD% -m pip install -r "%REQ_FILE%"
+  %PYCMD% -m pip install %PIP_SCOPE% -r "%REQ_FILE%"
   if errorlevel 1 (
     echo ERROR: pip install failed.
     pause
@@ -73,7 +75,7 @@ if not exist "%PYINSTALLER%" (
 )
 
 echo Running Python installer (silent)...
-start "" /wait "%PYINSTALLER%" /quiet InstallAllUsers=1 PrependPath=1
+start "" /wait "%PYINSTALLER%" /quiet InstallAllUsers=0 PrependPath=1
 if errorlevel 1 (
   echo WARNING: Python installer returned an error code. Please run the installer manually if needed.
   pause
@@ -82,5 +84,6 @@ if errorlevel 1 (
 
 echo Python installation attempted. Re-checking for python...
 rem Re-run this script (it will now take the PYCMD branch above)
+set "PATH=%LocalAppData%\Programs\Python\Python314;%PATH%"
 "%~f0"
 exit /b 0

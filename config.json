@@ -1,10 +1,14 @@
 {
   "vm_name": "Windows10",
   "video_id": "LIVE_ID",
+  "allowed_users": [],
   "Cust_plgs": {
     "!key": ["BadKeyboards", "press"],
     "!type": ["BadKeyboards", "type"],
+    "!combo": ["BadKeyboards", "combo"],
     "!move": ["BadMouses", "move_rel"],
+    "!click": ["BadMouses", "click"],
+    "!scroll": ["BadMouses", "scroll"],
     "!focus": ["ForegroundStub", "focus"]
   }
 }

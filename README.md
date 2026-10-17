@@ -11,24 +11,22 @@ Alpha — actively being reworked. Not production-ready. Use on test machines an
 - Listen to a YouTube live chat stream
 - Parse chat messages for predefined commands
 - Map chat commands to VirtualBox actions (start, stop, pause, snapshot, send keyboard/mouse events)
-- Basic access control via allowed user list or command tokens
+- Access control using an allowlist of YouTube channel IDs
 - Desktop UI showing VM state, action buttons, snapshots, and an event log
-- Built-in chat commands: `!start`, `!stop`, `!pause`, `!resume`, `!reset`, and `!snapshot <name>`
-
-> The exact supported commands and configuration depend on the implementation files in the repo. The README below gives a generic setup and usage guide you can adapt.
+- Built-in chat commands: `!help`, `!status`, `!start`, `!stop`, `!pause`, `!resume`, `!reset`, and `!snapshot <name>`
 
 ## Requirements
 
-- VirtualBox installed and `VBoxManage` available on PATH
-- Python 3.8+ (or the language/runtime used by the project)
+- VirtualBox installed with its Python API available to the selected Python interpreter
+- Python 3.8+
 - Network access to YouTube live chat
 - (Optional) A dedicated low-privilege account to run the controller
 
 ## Security notes
 
 - Running remote-controlled VM actions is dangerous. Restrict access:
-  - Limit which YouTube accounts can send commands (whitelist)
-  - Use command tokens or moderator-only commands
+  - Configure trusted YouTube channel IDs in `allowed_users`; display names are not accepted
+  - Keep the allowlist restricted to trusted channel IDs
   - Run controller with least privilege required
   - Test carefully on non-production systems
 
@@ -45,8 +43,9 @@ configuration tool. Review the script before executing it if you need to audit
 the installation steps.
 
 After installation, configure `config.json` with the VirtualBox VM name, the
-YouTube live video ID, and an optional `allowed_users` whitelist. Start the
-controller with:
+YouTube live video ID, and at least one trusted channel ID in `allowed_users`.
+An empty allowlist disables control commands; only `!help` and `!status` remain
+public. Start the controller with:
 
 ```powershell
 python main.py --config config.json
@@ -64,8 +63,8 @@ the project directory.
 ## Desktop UI and VM commands
 
 The UI connects to the configured VM and provides start, stop, pause, resume,
-reset, and snapshot actions. The chat listener runs in a background thread so
-the status display and event log remain responsive.
+reset, and snapshot actions. Long-running VM operations run in the background
+so the window remains responsive.
 
 The same VM actions can be sent from YouTube Live Chat:
 
@@ -77,6 +76,8 @@ The same VM actions can be sent from YouTube Live Chat:
 | `!resume` | Resume the VM |
 | `!reset` | Reset the VM |
 | `!snapshot <name>` | Create a snapshot |
+| `!status` | Show the VM state |
+| `!help` | List available commands |
 
 ## Configuration example (JSON)
 
@@ -84,32 +85,36 @@ The same VM actions can be sent from YouTube Live Chat:
 {
   "vm_name": "Test VM",
   "video_id": "YOUR_LIVE_STREAM_ID",
-  "allowed_users": ["your_channel_name", "trusted_channel_id"],
+  "allowed_users": ["UCxxxxxxxxxxxxxxxxxxxxxx"],
   "Cust_plgs": {
     "!key": ["BadKeyboards", "press"],
     "!type": ["BadKeyboards", "type"],
+    "!combo": ["BadKeyboards", "combo"],
     "!move": ["BadMouses", "move_rel"],
+    "!click": ["BadMouses", "click"],
+    "!scroll": ["BadMouses", "scroll"],
     "!focus": ["ForegroundStub", "focus"]
   }
 }
 ```
 
-If `allowed_users` is empty or absent, commands are accepted from every chat
-user. Use a whitelist for any VM exposed to a public stream.
+`allowed_users` must contain YouTube channel IDs, not display names. If the
+list is empty or absent, VM control commands are rejected. `!help` and
+`!status` are read-only and remain available to all viewers.
 
 ## Typical command flow
 
 1. A chat message is received and parsed.
-2. The sender is checked against allowed users or token-based checks.
-3. If authorized and the message matches a command, the corresponding VBoxManage command is executed.
-4. Results (success/failure) may be posted back to chat or logged locally.
+2. The sender's YouTube channel ID is checked against `allowed_users`.
+3. If authorized and the message matches a command, the corresponding VirtualBox Python API action is executed.
+4. Results and errors are logged locally.
 
 ## Troubleshooting
 
-- "Permission denied" when executing VBoxManage:
+- "Permission denied" when controlling VirtualBox:
   - Ensure the user running the script has permission to control VirtualBox.
-- Not receiving chat messages:
-  - Verify YouTube API credentials and that the live stream has an active liveChatId.
+- Chat commands are ignored:
+  - Verify that `allowed_users` contains the sender's YouTube channel ID.
 - Commands not recognized:
   - Check your config mapping and any command parsing rules.
 
@@ -128,4 +133,4 @@ Thanks to halohunter5283 for the project idea and to webik-216 (PuroTheNerd1) fo
 
 ## License
 
-Specify a license for the project (e.g., MIT, Apache-2.0). If no license is present, the repository defaults to “All rights reserved” — consider adding a license file.
+MIT; see [LICENSE.txt](LICENSE.txt).

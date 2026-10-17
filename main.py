@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+import queue
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -28,29 +29,39 @@ class Youtube2Box:
         self.vm = self.vbox.find_machine(self.config["vm_name"])
         self.session = None
         self.modules = {}
-        self.cmd_map = self.config.get("Cust_plgs", {})
+        self.cmd_map = {
+            command.lower(): mapping
+            for command, mapping in self.config.get("Cust_plgs", {}).items()
+        }
         allowed_users = self.config.get("allowed_users", [])
-        if not isinstance(allowed_users, list):
-            raise ValueError("Configuration field 'allowed_users' must be an array")
-        self.allowed_users = {str(user).strip().lower() for user in allowed_users if str(user).strip()}
+        self.allowed_users = {user.strip().lower() for user in allowed_users}
         self.chat_thread = None
+        self.chat = None
         self.stop_event = threading.Event()
         self.action_lock = threading.RLock()
         if self.state() in ("running", "paused", "stuck"):
             self.connect_session()
 
     def _validate_config(self):
+        if not isinstance(self.config, dict):
+            raise ValueError("Configuration root must be an object")
         for key in ("vm_name", "video_id"):
             if not isinstance(self.config.get(key), str) or not self.config[key].strip():
                 raise ValueError(f"Configuration field '{key}' is required")
         if not isinstance(self.config.get("Cust_plgs", {}), dict):
             raise ValueError("Configuration field 'Cust_plgs' must be an object")
+        allowed_users = self.config.get("allowed_users", [])
+        if not isinstance(allowed_users, list) or any(
+            not isinstance(user, str) or not user.strip() for user in allowed_users
+        ):
+            raise ValueError("Configuration field 'allowed_users' must be an array of channel IDs")
 
     def emit(self, message):
         self.on_event(message)
 
     def state(self):
-        return str(self.vm.state).rsplit(".", 1)[-1].lower()
+        with self.action_lock:
+            return str(self.vm.state).rsplit(".", 1)[-1].lower()
 
     def start(self):
         with self.action_lock:
@@ -130,6 +141,7 @@ class Youtube2Box:
             "resume": self.resume,
             "reset": self.reset,
             "snapshot": lambda: self.save_snapshot(argument),
+            "status": lambda: f"Etat VM: {self.state()}",
         }
         if action not in actions:
             message = f"Action inconnue: {action}"
@@ -150,7 +162,16 @@ class Youtube2Box:
             return None
         command = parts[0].lower()
         argument = parts[1] if len(parts) > 1 else ""
-        builtins = {f"!{name}": name for name in ("start", "stop", "pause", "resume", "reset", "snapshot")}
+        if command == "!help":
+            commands = ["!help", "!status", "!start", "!stop", "!pause", "!resume", "!reset", "!snapshot <nom>"]
+            commands.extend(sorted(self.cmd_map))
+            result = "Commandes: " + ", ".join(commands)
+            self.emit(result)
+            return result
+        builtins = {
+            f"!{name}": name
+            for name in ("start", "stop", "pause", "resume", "reset", "snapshot", "status")
+        }
         if command in builtins:
             return self.run_action(builtins[command], argument)
         if command not in self.cmd_map:
@@ -159,43 +180,60 @@ class Youtube2Box:
         if not isinstance(mapping, (list, tuple)) or len(mapping) != 2:
             self.emit(f"Configuration invalide pour: {command}")
             return None
-        module_name, method_name = mapping
-        module = self.modules.get(module_name)
-        function = getattr(module, method_name, None) if module else None
-        if not function:
-            self.emit(f"Console VM indisponible pour: {command}")
-            return None
         try:
             with self.action_lock:
+                module_name, method_name = mapping
+                if not isinstance(module_name, str) or not isinstance(method_name, str):
+                    raise ValueError("les noms du plugin et de la methode doivent etre du texte")
+                module = self.modules.get(module_name)
+                function = getattr(module, method_name, None) if module else None
+                if not callable(function):
+                    raise RuntimeError("console VM indisponible ou methode inconnue")
                 function(argument)
             self.emit(f"Commande executee: {command}")
         except Exception as error:
             self.emit(f"Erreur commande {command}: {error}")
         return command
 
+    @staticmethod
+    def is_public_command(message):
+        parts = message.strip().split(maxsplit=1)
+        return bool(parts) and parts[0].lower() in ("!help", "!status")
+
     def is_allowed(self, item):
         if not self.allowed_users:
-            return True
+            return False
         author = getattr(item, "author", None)
-        values = {
-            str(getattr(author, "name", "")).lower(),
-            str(getattr(author, "channelId", "")).lower(),
-        }
-        return bool(values & self.allowed_users)
+        channel_id = str(getattr(author, "channelId", "")).strip().lower()
+        return channel_id in self.allowed_users
 
     def run_chat(self):
+        chat = None
         try:
             chat = pytchat.create(video_id=self.config["video_id"])
+            self.chat = chat
+            if not self.allowed_users:
+                self.emit("Commandes de controle desactivees: configurez allowed_users avec des channelId YouTube")
             self.emit(f"Chat actif pour {self.config['vm_name']}")
             while chat.is_alive() and not self.stop_event.is_set():
                 for item in chat.get().sync_items():
-                    if self.is_allowed(item):
+                    if self.stop_event.is_set():
+                        break
+                    if self.is_allowed(item) or self.is_public_command(item.message):
                         self.dispatch_chat_command(item.message)
                     else:
                         LOGGER.warning("Commande ignoree: utilisateur non autorise")
         except Exception as error:
             LOGGER.exception("Erreur de l'ecoute YouTube")
             self.emit(f"Erreur chat: {error}")
+        finally:
+            if chat is not None:
+                try:
+                    chat.terminate()
+                except Exception:
+                    LOGGER.exception("Erreur lors de l'arret du chat YouTube")
+            if self.chat is chat:
+                self.chat = None
 
     def start_chat(self):
         if self.chat_thread and self.chat_thread.is_alive():
@@ -207,8 +245,13 @@ class Youtube2Box:
 
     def close(self):
         self.stop_event.set()
+        if self.chat:
+            try:
+                self.chat.terminate()
+            except Exception:
+                LOGGER.exception("Erreur lors de l'arret du chat YouTube")
         if self.chat_thread and self.chat_thread.is_alive():
-            self.chat_thread.join(timeout=2)
+            self.chat_thread.join(timeout=5)
         with self.action_lock:
             if self.session:
                 try:
@@ -223,6 +266,9 @@ class Youtube2Box:
 class ControlWindow:
     def __init__(self, controller):
         self.controller = controller
+        self.events = queue.Queue()
+        self.shutdown_sentinel = object()
+        self.closing = False
         self.root = tk.Tk()
         self.root.title("Youtube2Box - Controle VirtualBox")
         self.root.geometry("620x440")
@@ -230,6 +276,7 @@ class ControlWindow:
         self.status = tk.StringVar(value="Etat: inconnu")
         self._build()
         self.root.after(1000, self.refresh_state)
+        self.root.after(50, self.drain_events)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build(self):
@@ -250,11 +297,14 @@ class ControlWindow:
         self.controller.on_event = self.write_log
 
     def action(self, name):
-        self.controller.run_action(name)
-        self.refresh_state()
+        self.run_in_background(lambda: self.controller.run_action(name))
 
     def snapshot(self):
-        self.controller.run_action("snapshot", "manual")
+        self.run_in_background(lambda: self.controller.run_action("snapshot", "manual"))
+
+    @staticmethod
+    def run_in_background(action):
+        threading.Thread(target=action, daemon=True).start()
 
     def refresh_state(self):
         try:
@@ -264,7 +314,19 @@ class ControlWindow:
         self.root.after(1000, self.refresh_state)
 
     def write_log(self, message):
-        self.root.after(0, self._write_log, message)
+        self.events.put(message)
+
+    def drain_events(self):
+        while True:
+            try:
+                message = self.events.get_nowait()
+            except queue.Empty:
+                break
+            if message is self.shutdown_sentinel:
+                self.root.destroy()
+                return
+            self._write_log(message)
+        self.root.after(50, self.drain_events)
 
     def _write_log(self, message):
         self.log.configure(state="normal")
@@ -273,8 +335,16 @@ class ControlWindow:
         self.log.configure(state="disabled")
 
     def close(self):
-        self.controller.close()
-        self.root.destroy()
+        if self.closing:
+            return
+        self.closing = True
+        threading.Thread(target=self.shutdown, daemon=True).start()
+
+    def shutdown(self):
+        try:
+            self.controller.close()
+        finally:
+            self.events.put(self.shutdown_sentinel)
 
     def run(self):
         self.root.mainloop()
@@ -288,7 +358,12 @@ def main():
     args = parser.parse_args()
     controller = Youtube2Box(args.config)
     if args.no_ui:
-        controller.run_chat()
+        try:
+            controller.run_chat()
+        except KeyboardInterrupt:
+            LOGGER.info("Arret demande")
+        finally:
+            controller.close()
     else:
         ControlWindow(controller).run()
 

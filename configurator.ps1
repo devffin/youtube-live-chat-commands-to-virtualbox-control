@@ -63,15 +63,15 @@ try {
         Write-Host "`nFile: $configPath"
         Write-Host "`n[1] VM name         : $vmName"
         Write-Host "[2] Live video ID   : $videoId"
-        Write-Host "[3] Allowed users   : $(if ($allowedUsers.Count) { $allowedUsers -join ', ' } else { '(all)' })"
+        Write-Host "[3] Channel IDs     : $(if ($allowedUsers.Count) { $allowedUsers -join ', ' } else { '(none; control commands disabled)' })"
         Write-Host "[4] Plugins JSON    : $($pluginsJson -replace '\s+', ' ' | Select-Object -First 1)"
         Write-Host "`n[S] Save            [Q] Quit without saving"
 
-        $choice = (Read-Host '`nChoice').Trim().ToUpperInvariant()
+        $choice = (Read-Host 'Choice').Trim().ToUpperInvariant()
         switch ($choice) {
             '1' { $vmName = Read-Value 'VM name' $vmName }
             '2' { $videoId = Read-Value 'YouTube live ID' $videoId }
-            '3' { $allowedUsers = @(Read-Multiline 'Allowed users' $allowedUsers) }
+            '3' { $allowedUsers = @(Read-Multiline 'YouTube channel IDs' $allowedUsers) }
             '4' {
                 Write-Host "`nPaste the plugin JSON on one line."
                 Write-Host 'Example: {"!key":["BadKeyboards","press"]}'
@@ -89,6 +89,11 @@ try {
             'S' {
                 if ([string]::IsNullOrWhiteSpace($vmName) -or [string]::IsNullOrWhiteSpace($videoId)) {
                     Write-Host 'The VM name and live ID are required.' -ForegroundColor Red
+                    Read-Host 'Press Enter to continue'
+                    continue
+                }
+                if ($allowedUsers.Count -eq 0) {
+                    Write-Host 'Add at least one YouTube channel ID before enabling chat control.' -ForegroundColor Red
                     Read-Host 'Press Enter to continue'
                     continue
                 }

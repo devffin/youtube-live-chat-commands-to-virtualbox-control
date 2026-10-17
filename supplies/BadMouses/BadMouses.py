@@ -25,9 +25,9 @@ class BadMouses:
     def scroll(self, args):
         try:
             dz = int(args)
-            self.mouse.put_mouse_event(0, 0, dz, 0, 0)
-        except ValueError:
-            print("BadMouses: scroll value must be an integer")
+        except (TypeError, ValueError) as error:
+            raise ValueError("scroll value must be an integer") from error
+        self.mouse.put_mouse_event(0, 0, dz, 0, 0)
 
     @staticmethod
     def _coordinates(args):
@@ -36,7 +36,6 @@ class BadMouses:
             if len(values) != 2:
                 raise ValueError
             return int(values[0]), int(values[1])
-        except (AttributeError, ValueError):
-            print("BadMouses: expected two integer coordinates")
-            return None
+        except (AttributeError, ValueError) as error:
+            raise ValueError("expected two integer coordinates") from error
 
